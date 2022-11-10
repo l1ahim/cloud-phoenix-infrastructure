@@ -81,13 +81,13 @@ variable "image_repo_name" {
 variable "github_repo" {
   description = "URL of GitHUB repository"
   type        = string
-  default     = "https://github.com/l1ahim/cloud-phoenix-pipeline"
+  default     = "https://github.com/l1ahim/cloud-phoenix-app"
 }
 
 variable "github_repo_name" {
   description = "GitHUB repository name"
   type        = string
-  default     = "cloud-phoenix-pipeline"
+  default     = "cloud-phoenix-app"
 }
 
 variable "github_owner" {

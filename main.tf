@@ -16,6 +16,12 @@ locals {
     Name        = "Phoenix Production VPC"
   }
 
+  iam_tags = {
+    Maintainers = "Claranet DevOps Team"
+    Environment = "Production"
+    Application = "Phoenix"
+    Name        = "Phoenix Prod Policies"
+  }
   ssm_tags = {
     Maintainers = "Claranet DevOps Team"
     Environment = "Production"
@@ -83,12 +89,14 @@ module "private_subnets" {
   type               = var.subnet_type_private
 }
 
-##### VPC Endpoints & Security Group
+#############################################
+#               VPC SECURITY GROUP
+#############################################
 module "sg_vpc_endpoint" {
-  source = "cloudposse/security-group/aws"
+  source  = "cloudposse/security-group/aws"
   version = "1.0.1"
 
-  attributes = ["vpc-endpoint-sg"]
+  attributes = ["cl-ph-vpc-endpoint-sg"]
 
   # Allow unlimited egress
   allow_all_egress = true
@@ -108,13 +116,12 @@ module "sg_vpc_endpoint" {
   vpc_id = module.vpc.vpc_id
 }
 
-module "sg_alb_ingress" {
-  source = "cloudposse/security-group/aws"
+module "sg_alb" {
+  source  = "cloudposse/security-group/aws"
   version = "1.0.1"
 
   attributes = ["cl-ph-alb-sg"]
 
-  # Allow unlimited egress
   allow_all_egress = true
 
   rules = [
@@ -127,59 +134,101 @@ module "sg_alb_ingress" {
       cidr_blocks = ["0.0.0.0/0"]
       self        = null
       description = "Allow HTTP from everywhere"
+    },
+    {
+      key         = "https"
+      type        = "ingress"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+      self        = null
+      description = "Allow HTTPS from everywhere"
     }
   ]
   vpc_id = module.vpc.vpc_id
 }
 
-#module "vpc_endpoints" {
-#  source  = "cloudposse/vpc/aws//modules/vpc-endpoints"
-#  version = "2.0.0"
+#############################################
+#               VPC ENDPOINTS
+#############################################
 
-#  vpc_id = module.vpc.vpc_id
+module "vpc_endpoints" {
+  source  = "cloudposse/vpc/aws//modules/vpc-endpoints"
+  version = "2.0.0"
 
-#  interface_vpc_endpoints = {
-#    "ecs" = {
-#      name                = "ecs"
-#      security_group_ids  = [module.sg_vpc_endpoint.id]
-#      subnet_ids          = values(module.private_subnets.az_subnet_ids)
-#      policy              = null
-#      private_dns_enabled = true
-#    },
-#    "ecs-agent" = {
-#      name                = "ecs-agent"
-#      security_group_ids  = [module.sg_vpc_endpoint.id]
-#      subnet_ids          = values(module.private_subnets.az_subnet_ids)
-#      policy              = null
-#      private_dns_enabled = false
-#    },
-#    "ecr" = {
-#      name                = "ecr.api"
-#      security_group_ids  = [module.sg_vpc_endpoint.id]
-#      subnet_ids          = values(module.private_subnets.az_subnet_ids)
-#      policy              = null
-#      private_dns_enabled = true
-#    },
-#    "dkr" = {
-#      name                = "ecr.dkr"
-#      security_group_ids  = [module.sg_vpc_endpoint.id]
-#      subnet_ids          = values(module.private_subnets.az_subnet_ids)
-#      policy              = null
-#      private_dns_enabled = true
-#    },
-#    "codepipeline" = {
-#      name                = "codepipeline"
-#      security_group_ids  = [module.sg_vpc_endpoint.id]
-#      subnet_ids          = values(module.private_subnets.az_subnet_ids)
-#      policy              = null
-#      private_dns_enabled = true
-#    }
-#  }
-#}
+  vpc_id = module.vpc.vpc_id
+
+  gateway_vpc_endpoints = {
+    "s3" = {
+      name = "s3"
+      route_table_ids = values(module.private_subnets.az_route_table_ids)
+      policy = jsonencode({
+        Version = "2012-10-17"
+        Statement = [
+          {
+            Action = [
+              "s3:*",
+            ]
+            Effect    = "Allow"
+            Principal = "*"
+            Resource  = "*"
+          },
+        ]
+      })
+    }
+  }
+
+  interface_vpc_endpoints = {
+    "ecs" = {
+      name                = "ecs"
+      security_group_ids  = [module.sg_vpc_endpoint.id]
+      subnet_ids          = values(module.private_subnets.az_subnet_ids)
+      policy              = null
+      private_dns_enabled = true
+    },
+     "ssm" = {
+      name                = "ssm"
+      security_group_ids  = [module.sg_vpc_endpoint.id]
+      subnet_ids          = values(module.private_subnets.az_subnet_ids)
+      policy              = null
+      private_dns_enabled = true
+    },
+    "ecs-agent" = {
+      name                = "ecs-agent"
+      security_group_ids  = [module.sg_vpc_endpoint.id]
+      subnet_ids          = values(module.private_subnets.az_subnet_ids)
+      policy              = null
+      private_dns_enabled = false
+    },
+    "ecr" = {
+      name                = "ecr.api"
+      security_group_ids  = [module.sg_vpc_endpoint.id]
+      subnet_ids          = values(module.private_subnets.az_subnet_ids)
+      policy              = null
+      private_dns_enabled = true
+    },
+    "dkr" = {
+      name                = "ecr.dkr"
+      security_group_ids  = [module.sg_vpc_endpoint.id]
+      subnet_ids          = values(module.private_subnets.az_subnet_ids)
+      policy              = null
+      private_dns_enabled = true
+    },
+    "codepipeline" = {
+      name                = "codepipeline"
+      security_group_ids  = [module.sg_vpc_endpoint.id]
+      subnet_ids          = values(module.private_subnets.az_subnet_ids)
+      policy              = null
+      private_dns_enabled = true
+    }
+  }
+}
 
 #############################################
 #               CLOUDWATCH
 #############################################
+
 module "cloudwatch_logs" {
   source  = "cloudposse/cloudwatch-logs/aws"
   version = "0.6.6"
@@ -207,53 +256,9 @@ module "flow_logs" {
 }
 
 #############################################
-#               DATABASE
-#############################################
-#module "documentdb_cluster" {
-#  source = "cloudposse/documentdb-cluster/aws"
-#  version = "0.15.0"
-
-#  namespace               = "eg"
-#  stage                   = "testing"
-#  name                    = "docdb"
-#  cluster_size            = 3
-#  master_username         = "admin1"
-#  master_password         = "Test123456789"
-#  instance_class          = "db.t3.medium"
-#  vpc_id                  = module.vpc.vpc_id
-#  subnet_ids              = values(module.private_subnets.az_subnet_ids)
-#  allowed_security_groups = [module.vpc.vpc_default_security_group_id]
-#}
-
-#############################################
-#               CODEPIPELINE - CI/CD
+#               Parameter Store
 #############################################
 
-
-## github token should be taken from parameter store
-module "ecs_push_pipeline" {
-  source  = "cloudposse/ecs-codepipeline/aws"
-  version = "0.30.0"
-
-  name                    = "phoenix"
-  namespace               = "cl"
-  stage                   = "production"
-  github_oauth_token      = "/cl/prod/app/github/oauth"
-  repo_owner              = "l1ahim"
-  repo_name               = "cloud-phoenix-pipeline"
-  branch                  = "main"
-  service_name            = "phoenix"
-  ecs_cluster_name        = "cl-phoenix-prod-cluster"
-  privileged_mode         = true
-  webhook_enabled         = false
-  image_repo_name         = var.image_repo_name
-  image_tag               = "latest"
-  s3_bucket_force_destroy = true
-  region                  = local.region
-}
-
-
-###### Parameter Store
 module "store_write" {
   source  = "cloudposse/ssm-parameter-store/aws"
   version = "0.10.0"
@@ -261,7 +266,7 @@ module "store_write" {
   parameter_write = [
     {
       name        = "/cl/prod/app/github/oauth"
-      value       = "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"
+      value       = var.github_oauth_token
       type        = "String"
       overwrite   = "true"
       description = "GitHub OAuth to clone the repo"
@@ -273,53 +278,65 @@ module "store_write" {
 
 
 #############################################
-#               ALB
+#               DATABASE
 #############################################
-module "alb" {
-  source = "cloudposse/alb/aws"
-  version     = "1.5.0"
 
-  namespace                               = var.namespace
-  stage                                   = var.stage
-  name                                    = var.name
+module "documentdb_cluster" {
+  source = "cloudposse/documentdb-cluster/aws"
+  version = "0.15.0"
 
-  vpc_id                                  = module.vpc.vpc_id
-  security_group_ids                      = [module.sg_alb_ingress.id]
-  subnet_ids                              = values(module.public_subnets.az_subnet_ids)
-  internal                                = var.internal
-  http_enabled                            = var.http_enabled
-  access_logs_enabled                     = var.access_logs_enabled
-  cross_zone_load_balancing_enabled       = var.cross_zone_load_balancing_enabled
-  http2_enabled                           = var.http2_enabled
-  idle_timeout                            = var.idle_timeout
-  ip_address_type                         = var.ip_address_type
-  deletion_protection_enabled             = var.deletion_protection_enabled
-  deregistration_delay                    = var.deregistration_delay
-  health_check_path                       = var.health_check_path
-  health_check_timeout                    = var.health_check_timeout
-  health_check_healthy_threshold          = var.health_check_healthy_threshold
-  health_check_unhealthy_threshold        = var.health_check_unhealthy_threshold
-  health_check_interval                   = var.health_check_interval
-  health_check_matcher                    = var.health_check_matcher
-  target_group_port                       = var.target_group_port
-  target_group_target_type                = var.target_group_target_type
-
-  tags = local.alb_tags
+  namespace               = "eg"
+  stage                   = "testing"
+  name                    = "docdb"
+  cluster_size            = 3
+  master_username         = "admin1"
+  master_password         = "Test123456789"
+  instance_class          = "db.t3.medium"
+  vpc_id                  = module.vpc.vpc_id
+  subnet_ids              = values(module.private_subnets.az_subnet_ids)
+  allowed_security_groups = [module.vpc.vpc_default_security_group_id]
 }
 
-module "alb_ingress" {
-  source = "cloudposse/alb-ingress/aws"
-  version     = "0.25.1"
-
-  namespace                           = var.namespace
-  stage                               = var.stage
-  name                                = "cl-ph-alb"
-
-  vpc_id                              = module.vpc.vpc_id
+#############################################
+#               ALB
+#############################################
 
 
-  default_target_group_enabled        = false
-  target_group_arn                    = module.alb.default_target_group_arn
+#############################################
+#               ECS
+#############################################
 
-  tags = local.alb_tags
+resource "aws_ecs_cluster" "phoenix" {
+  name = "phoenix-cluster"
+}
+
+resource "aws_ecs_cluster_capacity_providers" "cl_ph_capacity" {
+  cluster_name = aws_ecs_cluster.phoenix.name
+
+  capacity_providers = ["FARGATE"]
+
+  default_capacity_provider_strategy {
+    base              = 1
+    weight            = 100
+    capacity_provider = "FARGATE"
+  }
+}
+
+#############################################
+#               CODEPIPELINE - CI/CD
+#############################################
+
+module "cicd_pipeline" {
+  source = "./modules/pipeline"
+
+  github_repo          = var.github_repo
+  vpc_id               = module.vpc.vpc_id
+  private_subnets      = values(module.private_subnets.az_subnet_ids)
+  security_group_ids   = [module.sg_alb.id]
+  github_oauth_token   = var.github_oauth_token
+  github_owner         = var.github_owner
+  github_repo_name     = var.github_repo_name
+  db_connection_string = var.db_connection_string
+  tags                 = local.iam_tags
+  repo_source_version  = var.repo_branch
 }
